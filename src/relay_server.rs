@@ -412,6 +412,7 @@ async fn handle_connection(
         });
         return;
     }
+    let permit = match crate::common::connection_permit() { Some(permit) => permit, None => return };
     let ip = ip.to_string();
     if BLOCKLIST.read().await.get(&ip).is_some() {
         log::info!("{} blocked", ip);
@@ -420,7 +421,7 @@ async fn handle_connection(
     let key = key.to_owned();
     let limiter = limiter.clone();
     tokio::spawn(async move {
-        allow_err!(make_pair(stream, addr, &key, limiter, ws).await);
+        allow_err!(make_pair(stream, addr, &key, limiter, ws, permit).await);
     });
 }
 
@@ -430,6 +431,7 @@ async fn make_pair(
     key: &str,
     limiter: Limiter,
     ws: bool,
+    permit: tokio::sync::OwnedSemaphorePermit,
 ) -> ResultType<()> {
     if ws {
         use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -455,10 +457,12 @@ async fn make_pair(
             }
             Ok(response)
         };
-        let ws_stream = timeout(30_000, tokio_tungstenite::accept_hdr_async(stream, callback)).await??;
-        make_pair_(ws_stream, addr, key, limiter).await;
+        let ws_stream = timeout(30_000, tokio_tungstenite::accept_hdr_async_with_config(stream, callback, Some(crate::common::websocket_config(true)))).await??;
+        make_pair_(LimitedStream { inner: ws_stream, _permit: permit }, addr, key, limiter).await;
     } else {
-        make_pair_(FramedStream::from(stream, addr), addr, key, limiter).await;
+        let mut stream = FramedStream::from(stream, addr);
+        *stream.0.codec_mut() = crate::common::control_codec();
+        make_pair_(LimitedStream { inner: stream, _permit: permit }, addr, key, limiter).await;
     }
     Ok(())
 }
@@ -689,6 +693,20 @@ trait StreamTrait: Send + Sync + 'static {
     async fn send_raw(&mut self, bytes: Bytes) -> ResultType<()>;
     fn is_ws(&self) -> bool;
     fn set_raw(&mut self);
+}
+
+// The permit follows the socket when a waiting stream moves into a relay pair.
+struct LimitedStream<T> {
+    inner: T,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+#[async_trait]
+impl<T: StreamTrait> StreamTrait for LimitedStream<T> {
+    async fn recv(&mut self) -> Option<Result<BytesMut, Error>> { self.inner.recv().await }
+    async fn send_raw(&mut self, bytes: Bytes) -> ResultType<()> { self.inner.send_raw(bytes).await }
+    fn is_ws(&self) -> bool { self.inner.is_ws() }
+    fn set_raw(&mut self) { self.inner.set_raw(); }
 }
 
 #[async_trait]
