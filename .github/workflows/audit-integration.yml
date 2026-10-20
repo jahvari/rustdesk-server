@@ -1,0 +1,64 @@
+name: Audit fixes integration
+on:
+  push:
+    branches: [codex/validate-focused-fixes]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Test server regressions
+        run: cargo test --locked --all-targets --target x86_64-pc-windows-msvc -- --test-threads=1
+      - name: Test runtime installer decisions
+        shell: powershell
+        run: .\packaging\windows\Test-InstallerLogic.ps1
+      - name: Build installer with latest Microsoft runtime
+        shell: powershell
+        run: .\packaging\windows\Build-Installer.ps1
+      - name: Validate installed native service lifecycle
+        shell: powershell
+        run: .\packaging\windows\Test-Installation.ps1 -InstallerPath .\target\windows-installer\RustDeskServer-Native-x64-Setup.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustdesk-native-${{ matrix.os }}
+          path: |
+            target/windows-installer/RustDeskServer-Native-x64-Setup.exe
+            target/windows-installer/payload/build-info.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustdesk-native-logs-${{ matrix.os }}
+          path: C:/ProgramData/RustDeskServer/logs/**
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Test server regressions
+        run: cargo test --locked --all-targets --target x86_64-unknown-linux-gnu -- --test-threads=1
+      - name: Check server static analysis
+        run: cargo clippy --locked --all-targets --target x86_64-unknown-linux-gnu -- -W clippy::await_holding_lock
+      - name: Test shared-library cache and trusted user lookup
+        run: |
+          cargo test --locked -p hbb_common fingerprint::tests::parallel_cache_reads_and_inserts_preserve_fingerprints --target x86_64-unknown-linux-gnu
+          cargo test --locked -p hbb_common platform::linux::tests::test_get_home_dir_trusted --target x86_64-unknown-linux-gnu
