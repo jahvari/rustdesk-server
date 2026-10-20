@@ -62,3 +62,10 @@ jobs:
         run: |
           cargo test --locked -p hbb_common fingerprint::tests::parallel_cache_reads_and_inserts_preserve_fingerprints --target x86_64-unknown-linux-gnu
           cargo test --locked -p hbb_common platform::linux::tests::test_get_home_dir_trusted --target x86_64-unknown-linux-gnu
+      - uses: actions/checkout@v4
+        with:
+          repository: jahvari/hbb_common
+          ref: d888ab6caaf9023675c0077c613dde9901d5c7af
+          path: work-current-hbb
+      - name: Check Linux dependency update against current shared-library upstream
+        run: cargo check --lib --manifest-path work-current-hbb/Cargo.toml --target x86_64-unknown-linux-gnu
