@@ -1,0 +1,94 @@
+name: Windows idle CPU investigation
+on:
+  push:
+    branches: [codex/investigate-windows-idle-cpu]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  idle-cpu:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: upstream-base
+            source: 873230e35a8805de7fd057e7eb763c46f7a174ef
+          - case: audit-fixes
+            source: 3e95219a50738138b0eb01db83c99bc4ded66e5f
+    steps:
+      - name: Check out fixed diagnostic tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: probe
+          persist-credentials: false
+          sparse-checkout: packaging/windows/Collect-HbbsCpu.ps1
+          sparse-checkout-cone-mode: false
+      - name: Check out server under investigation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.source }}
+          path: server
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+          shared-key: issue-186-windows2022
+      - name: Build foreground server
+        working-directory: server
+        shell: powershell
+        run: |
+          cargo build --locked --release --bin hbbs --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Capture twelve minutes of idle process and thread CPU
+        shell: powershell
+        run: |
+          .\probe\packaging\windows\Collect-HbbsCpu.ps1 -BinaryPath .\server\target\x86_64-pc-windows-msvc\release\hbbs.exe -OutputDirectory .\cpu-results -DurationSeconds 720 -SampleSeconds 2
+      - name: Summarize sustained CPU usage
+        shell: powershell
+        run: |
+          $rows = @(Import-Csv .\cpu-results\cpu.csv)
+          if (!$rows.Count) { throw 'No CPU samples were captured.' }
+          $hotSeconds = 0.0
+          $longestHotSeconds = 0.0
+          $previousSeconds = 0.0
+          foreach ($row in $rows) {
+              $seconds = [double]$row.ElapsedSeconds
+              if ([double]$row.CpuPercentOneCore -ge 80) {
+                  $hotSeconds += $seconds - $previousSeconds
+                  $longestHotSeconds = [Math]::Max($longestHotSeconds, $hotSeconds)
+              } else { $hotSeconds = 0.0 }
+              $previousSeconds = $seconds
+          }
+          $cpu = $rows | ForEach-Object { [double]$_.CpuPercentOneCore } | Measure-Object -Average -Maximum
+          $summary = [ordered]@{
+              Case = '${{ matrix.case }}'
+              ServerSource = '${{ matrix.source }}'
+              DiagnosticSource = '${{ github.sha }}'
+              RustCompiler = (& rustc --version)
+              Samples = $rows.Count
+              DurationSeconds = [double]$rows[-1].ElapsedSeconds
+              MeanOneCorePercent = $cpu.Average
+              PeakOneCorePercent = $cpu.Maximum
+              LongestRunAbove80PercentOneCoreSeconds = $longestHotSeconds
+              SustainedHighCpuObserved = ($longestHotSeconds -ge 30)
+          }
+          $summary | ConvertTo-Json | Tee-Object -FilePath .\cpu-results\summary.json
+          if ($longestHotSeconds -ge 30) { throw 'Sustained high CPU was observed; inspect the captured thread measurements.' }
+      - name: Upload measurements only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-186-${{ matrix.case }}-windows-2022
+          path: |
+            cpu-results/environment.json
+            cpu-results/cpu.csv
+            cpu-results/threads.csv
+            cpu-results/summary.json
+            cpu-results/stdout.log
+            cpu-results/stderr.log
+          if-no-files-found: warn
