@@ -1,0 +1,27 @@
+name: Merged shared-library validation
+on:
+  push:
+    branches: [codex/validate-merged-library]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  merged-library:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: jahvari/hbb_common
+          ref: de7073feb6fd63d346b5aa4058f84df804c40713
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: merged-current-hbb
+      - name: Test fingerprint cache in merged library
+        run: cargo test --lib fingerprint::tests::parallel_cache_reads_and_inserts_preserve_fingerprints --target x86_64-unknown-linux-gnu
+      - name: Test trusted user lookup in merged library
+        run: cargo test --lib platform::linux::tests::test_get_home_dir_trusted --target x86_64-unknown-linux-gnu
