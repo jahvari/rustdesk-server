@@ -8,6 +8,9 @@ on separate disposable Windows Server 2022 runners. Both are built with the same
 current stable Rust toolchain and sampled for twelve minutes with the foreground
 server, self-test enabled, normal process priority and information-level logging.
 The sampler binds loopback and uses fresh server keys and database files.
+It explicitly sets and verifies Normal process priority: hosted runners can
+otherwise inherit BelowNormal, and lowering priority was reported as a workaround
+in issue 186. Individual thread priorities are not changed.
 
 Measurements include process CPU, per-thread CPU and priority, working set,
 Windows version, binary hash, source commits and compiler version. A continuous
@@ -18,7 +21,8 @@ the generated private keys or test database.
 The shared library's existing update checker can access the runner account's
 separate RustDesk client configuration through Windows known folders. This is
 why each test uses a disposable runner. APPDATA overrides alone do not guarantee
-profile isolation. No runtime priority changes or CPU-throttling patches are used.
+profile isolation. There are no production priority changes or CPU-throttling
+patches.
 
 An unsuccessful reproduction on these current builds does not establish that
 the older report is resolved. Server 2019/2016 and historical release builds

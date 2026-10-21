@@ -43,6 +43,11 @@ try {
     if (!$started) { throw 'Could not start hbbs.' }
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
+    $process.PriorityClass = [Diagnostics.ProcessPriorityClass]::Normal
+    $process.Refresh()
+    if ($process.PriorityClass -ne [Diagnostics.ProcessPriorityClass]::Normal) {
+        throw 'The test requires Normal process priority; inherited lower priority could mask issue #186.'
+    }
     $os = Get-CimInstance Win32_OperatingSystem
     [ordered]@{
         Binary = $binary
