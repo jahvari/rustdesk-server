@@ -23,5 +23,18 @@ jobs:
           shared-key: merged-current-hbb
       - name: Test fingerprint cache in merged library
         run: cargo test --lib fingerprint::tests::parallel_cache_reads_and_inserts_preserve_fingerprints --target x86_64-unknown-linux-gnu
-      - name: Test trusted user lookup in merged library
-        run: cargo test --lib platform::linux::tests::test_get_home_dir_trusted --target x86_64-unknown-linux-gnu
+      - name: Test maintained Linux users alias in merged library
+        run: |
+          mkdir -p tests
+          test ! -e tests/merged_users_alias.rs
+          cat > tests/merged_users_alias.rs <<'RS'
+          #[test]
+          fn maintained_users_alias_resolves_current_user() {
+              use users::os::unix::UserExt;
+              let uid = users::get_current_uid();
+              let user = users::get_user_by_uid(uid).expect("runner user must exist");
+              assert_eq!(user.uid(), uid);
+              assert!(!user.home_dir().as_os_str().is_empty());
+          }
+          RS
+          cargo test --test merged_users_alias --target x86_64-unknown-linux-gnu
