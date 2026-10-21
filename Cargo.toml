@@ -50,9 +50,6 @@ reqwest = { version = "0.12.28", features = ["http2", "blocking", "socks", "json
 [target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
 reqwest = { version = "0.12.28", features = ["http2", "blocking", "socks", "json", "rustls-tls", "rustls-tls-native-roots", "gzip"], default-features=false }
 
-[build-dependencies]
-hbb_common = { path = "libs/hbb_common" }
-
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.1"
 
