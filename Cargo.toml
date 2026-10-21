@@ -26,7 +26,12 @@ clap = "2"
 rust-ini = "0.18"
 minreq = { version = "2.4", features = ["punycode"] }
 base64 = "0.13"
+<<<<<<< HEAD
 sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "sqlite", "macros", "chrono", "json" ] }
+=======
+axum = { version = "0.5", features = ["headers"] }
+sqlx = { version = "0.8.6", default-features = false, features = [ "runtime-tokio", "sqlite", "macros", "chrono", "json" ] }
+>>>>>>> origin/codex/update-sqlite-dependencies
 deadpool = "0.8"
 async-trait = "0.1"
 async-speed-limit = { git = "https://github.com/open-trade/async-speed-limit" }
