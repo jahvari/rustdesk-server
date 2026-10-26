@@ -1,0 +1,112 @@
+name: Reported issue fixes and server build
+on:
+  push:
+    branches: [codex/fix-reported-server-issues]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Test all server targets
+        run: cargo test --locked --all-targets --target x86_64-pc-windows-msvc -- --test-threads=1
+      - name: Test UDP send recovery
+        run: cargo test --locked -p hbb_common udp::send_recovery_tests::failed_datagram_does_not_block_the_next_destination --target x86_64-pc-windows-msvc -- --exact
+      - name: Test update opt-out and client-config isolation
+        run: python packaging/tests/update_checks.py --binary target/x86_64-pc-windows-msvc/debug/hbbs.exe
+      - name: Test installer runtime and firewall decisions
+        shell: powershell
+        run: .\packaging\windows\Test-InstallerLogic.ps1
+      - name: Build release binaries
+        run: cargo build --locked --release --bins --target x86_64-pc-windows-msvc
+      - name: Build installer with current signed runtime
+        shell: powershell
+        run: .\packaging\windows\Build-Installer.ps1 -SkipBuild
+      - name: Validate installed service lifecycle
+        shell: powershell
+        run: .\packaging\windows\Test-Installation.ps1 -InstallerPath .\target\windows-installer\RustDeskServer-Native-x64-Setup.exe
+      - name: Stage complete Windows distribution
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Get-ChildItem -LiteralPath target/windows-installer/payload -File | Copy-Item -Destination dist
+          Copy-Item -LiteralPath target/windows-installer/RustDeskServer-Native-x64-Setup.exe -Destination dist
+          Copy-Item -LiteralPath target/x86_64-pc-windows-msvc/release/rustdesk-utils.exe -Destination dist
+          Get-ChildItem -LiteralPath dist -File | Sort-Object Name | ForEach-Object {
+              '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content -LiteralPath dist/SHA256SUMS.txt -Encoding ASCII
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-server-${{ matrix.os }}
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reported-issue-service-logs-${{ matrix.os }}
+          path: C:/ProgramData/RustDeskServer/logs/**
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Test all server targets
+        run: cargo test --locked --all-targets --target x86_64-unknown-linux-gnu -- --test-threads=1
+      - name: Test UDP send recovery
+        run: cargo test --locked -p hbb_common udp::send_recovery_tests::failed_datagram_does_not_block_the_next_destination --target x86_64-unknown-linux-gnu -- --exact
+      - name: Test update opt-out and client-config isolation
+        run: python3 packaging/tests/update_checks.py --binary target/x86_64-unknown-linux-gnu/debug/hbbs
+      - name: Check static analysis
+        run: cargo clippy --locked --all-targets --target x86_64-unknown-linux-gnu -- -W clippy::await_holding_lock
+      - name: Package exact source including the pinned submodule
+        run: |
+          mkdir source-artifact
+          git archive --format=tar --prefix=RustDeskServer-source/ HEAD > source-artifact/RustDeskServer-source.tar
+          git -C libs/hbb_common archive --format=tar --prefix=RustDeskServer-source/libs/hbb_common/ HEAD > "$RUNNER_TEMP/hbb-source.tar"
+          tar --concatenate --file=source-artifact/RustDeskServer-source.tar "$RUNNER_TEMP/hbb-source.tar"
+          gzip -n source-artifact/RustDeskServer-source.tar
+          printf 'Server: %s\nShared library: %s\n' "$(git rev-parse HEAD)" "$(git -C libs/hbb_common rev-parse HEAD)" > source-artifact/source-revisions.txt
+          tar -tzf source-artifact/RustDeskServer-source.tar.gz | grep -Fx 'RustDeskServer-source/libs/hbb_common/Cargo.toml'
+          (cd source-artifact && sha256sum RustDeskServer-source.tar.gz source-revisions.txt > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-server-corresponding-source
+          path: source-artifact/*
+  current-library:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: jahvari/hbb_common
+          ref: 4db65ced5282014214c77408b5e02a877bbd4e7b
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libwayland-dev libxkbcommon-dev libx11-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: current-udp-recovery
+      - name: Test UDP recovery against current upstream library
+        run: cargo test --lib udp::send_recovery_tests::failed_datagram_does_not_block_the_next_destination --target x86_64-unknown-linux-gnu -- --exact
