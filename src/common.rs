@@ -426,6 +426,9 @@ pub async fn listen_signal() -> Result<()> {
 
 
 pub fn check_software_update() {
+    if get_arg("DISABLE_UPDATE_CHECK").eq_ignore_ascii_case("Y") {
+        return;
+    }
     const ONE_DAY_IN_SECONDS: u64 = 60 * 60 * 24;
     std::thread::spawn(move || loop {
         std::thread::spawn(move || allow_err!(check_software_update_()));
