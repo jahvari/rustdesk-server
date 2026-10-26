@@ -26,6 +26,7 @@ fn run() -> ResultType<()> {
     let args = format!(
         "--service 'Run as a native Windows service (Windows only)'
         --data-dir=[DIR] 'Absolute data directory for Windows service mode'
+        --disable-update-check=[Y|N] 'Disable outbound server update checks (default: N)'
         -c --config=[FILE] +takes_value 'Sets a custom config file'
         -b, --bind=[IP] 'Sets the IP address to bind to (default: all interfaces)'
         -p, --port=[NUMBER(default={RENDEZVOUS_PORT})] 'Sets the listening port'
