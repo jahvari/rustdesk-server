@@ -497,6 +497,7 @@ async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limit
     }
 }
 
+/// Forwards traffic in both directions while enforcing relay limits and timeouts.
 async fn relay(
     addr: SocketAddr,
     stream: &mut impl StreamTrait,
@@ -612,19 +613,24 @@ mod tests {
 
     #[async_trait]
     impl StreamTrait for TestStream {
+        /// Provides the test stream receive behavior.
         async fn recv(&mut self) -> Option<Result<BytesMut, Error>> {
             match self.data.take() {
                 Some(data) => Some(Ok(data)),
                 None => std::future::pending().await,
             }
         }
+        /// Simulates a relay write for the test stream.
         async fn send_raw(&mut self, _: Bytes) -> ResultType<()> {
             if self.blocked { std::future::pending().await } else { Ok(()) }
         }
+        /// Uses non-WebSocket framing for the test stream.
         fn is_ws(&self) -> bool { false }
+        /// Leaves the test stream unchanged when raw mode is requested.
         fn set_raw(&mut self) {}
     }
 
+    /// Checks that a blocked relay write ends with a timeout in the selected direction.
     async fn check_blocked_send(from_peer: bool) {
         let mut stream = TestStream {
             data: if from_peer { None } else { Some(BytesMut::from(&b"x"[..])) },
@@ -642,12 +648,14 @@ mod tests {
         assert!(error.downcast_ref::<tokio::time::error::Elapsed>().is_some());
     }
 
+    /// Checks that stalled writes time out in either relay direction.
     #[tokio::test]
     async fn blocked_writes_in_both_directions_time_out() {
         tokio::join!(check_blocked_send(false), check_blocked_send(true));
     }
 }
 
+/// Resolves the configured relay key to its public-key value when available.
 fn get_server_sk(key: &str) -> ResultType<String> {
     let mut key = key.to_owned();
     if let Ok(sk) = base64::decode(&key) {
