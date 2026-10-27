@@ -859,6 +859,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Serializes and sends a rendezvous message through an available connection sink.
     #[inline]
     async fn send_to_sink(sink: &mut Option<Sink>, msg: RendezvousMessage) {
         if let Some(sink) = sink.as_mut() {
@@ -1132,6 +1133,7 @@ impl RendezvousServer {
         res
     }
 
+    /// Handles loopback console requests and external NAT or online-status queries.
     async fn handle_listener2(&self, stream: TcpStream, addr: SocketAddr) {
         let mut rs = self.clone();
         let ip = try_into_v4(addr).ip();
@@ -1175,6 +1177,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Admits an accepted rendezvous connection and starts its handler.
     async fn handle_listener(&self, stream: TcpStream, addr: SocketAddr, key: &str, ws: bool) {
         let permit = match connection_permit(addr) { Some(permit) => Arc::new(permit), None => return };
         log::debug!("Tcp connection from {:?}, ws: {}", addr, ws);
@@ -1185,6 +1188,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Processes rendezvous messages on an accepted TCP or WebSocket connection.
     #[inline]
     async fn handle_listener_inner(
         &mut self,
@@ -1429,6 +1433,7 @@ async fn create_tcp_listener(bind_addr: Option<IpAddr>, port: i32) -> ResultType
 mod tests {
     use super::*;
 
+    /// Checks that an active signaling writer retains its admission permit.
     #[tokio::test]
     async fn signaling_writer_retains_capacity_after_reader_finishes() {
         let slots = Arc::new(tokio::sync::Semaphore::new(1));

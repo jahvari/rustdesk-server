@@ -383,6 +383,7 @@ async fn io_loop(
     }
 }
 
+/// Accepts a relay connection and routes loopback console requests separately.
 async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
@@ -418,6 +419,7 @@ async fn handle_connection(
     });
 }
 
+/// Prepares a TCP or WebSocket relay stream and begins pairing.
 async fn make_pair(
     stream: TcpStream,
     mut addr: SocketAddr,
@@ -628,9 +630,13 @@ fn get_server_sk(key: &str) -> ResultType<String> {
 
 #[async_trait]
 trait StreamTrait: Send + Sync + 'static {
+    /// Receives the next message from the relay stream.
     async fn recv(&mut self) -> Option<Result<BytesMut, Error>>;
+    /// Sends raw bytes through the relay stream.
     async fn send_raw(&mut self, bytes: Bytes) -> ResultType<()>;
+    /// Reports whether the relay stream uses WebSocket framing.
     fn is_ws(&self) -> bool;
+    /// Requests raw-byte mode for relay traffic.
     fn set_raw(&mut self);
 }
 
@@ -642,9 +648,13 @@ struct LimitedStream<T> {
 
 #[async_trait]
 impl<T: StreamTrait> StreamTrait for LimitedStream<T> {
+    /// Receives the next message from the relay stream.
     async fn recv(&mut self) -> Option<Result<BytesMut, Error>> { self.inner.recv().await }
+    /// Sends raw bytes through the relay stream.
     async fn send_raw(&mut self, bytes: Bytes) -> ResultType<()> { self.inner.send_raw(bytes).await }
+    /// Reports whether the relay stream uses WebSocket framing.
     fn is_ws(&self) -> bool { self.inner.is_ws() }
+    /// Requests raw-byte mode for relay traffic.
     fn set_raw(&mut self) { self.inner.set_raw(); }
 }
 
