@@ -460,7 +460,7 @@ async fn make_pair(
     Ok(())
 }
 
-/// Authenticates a relay request and pairs it with a waiting connection.
+/// Checks a configured relay key and pairs a request with a waiting connection.
 async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limiter: Limiter) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
@@ -615,7 +615,7 @@ async fn relay(
     Ok(())
 }
 
-/// Resolves the configured relay key to its public-key value when available.
+/// Returns the configured relay key or resolves a signing key to its public value.
 fn get_server_sk(key: &str) -> ResultType<String> {
     let mut key = key.to_owned();
     if let Ok(sk) = base64::decode(&key) {
