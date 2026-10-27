@@ -263,6 +263,7 @@ impl RendezvousServer {
         )
     }
 
+    /// Serves rendezvous listeners and scheduled maintenance until a listener fails.
     async fn io_loop(
         &mut self,
         rx: &mut Receiver,
@@ -363,6 +364,7 @@ impl RendezvousServer {
         }
     }
 
+    /// Processes a UDP rendezvous request and sends any applicable response.
     #[inline]
     async fn handle_udp(
         &mut self,
@@ -928,6 +930,7 @@ impl RendezvousServer {
         Ok(())
     }
 
+    /// Applies the per-IP registration rate and distinct-device limits.
     async fn check_ip_blocker(&self, ip: &str, id: &str) -> bool {
         let mut lock = IP_BLOCKER.lock().await;
         let now = Instant::now();
