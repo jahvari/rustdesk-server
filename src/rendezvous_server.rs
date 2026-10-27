@@ -1197,6 +1197,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Processes rendezvous messages on an accepted TCP or WebSocket connection.
     #[inline]
     async fn handle_listener_inner(
         &mut self,
