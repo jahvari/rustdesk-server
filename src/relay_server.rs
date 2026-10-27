@@ -460,6 +460,7 @@ async fn make_pair(
     Ok(())
 }
 
+/// Authenticates a relay request and pairs it with a waiting connection.
 async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limiter: Limiter) {
     let mut stream = stream;
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
@@ -502,12 +503,14 @@ async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limit
     }
 }
 
+/// Removes a waiting connection only if it still owns the requested pair ID.
 fn expire_waiter(peers: &mut HashMap<String, WaitingPeer>, id: &str, generation: &Arc<()>) {
     if peers.get(id).map(|(current, _)| Arc::ptr_eq(current, generation)).unwrap_or(false) {
         peers.remove(id);
     }
 }
 
+/// Forwards traffic in both directions while enforcing relay limits and timeouts.
 async fn relay(
     addr: SocketAddr,
     stream: &mut impl StreamTrait,
@@ -612,6 +615,7 @@ async fn relay(
     Ok(())
 }
 
+/// Resolves the configured relay key to its public-key value when available.
 fn get_server_sk(key: &str) -> ResultType<String> {
     let mut key = key.to_owned();
     if let Ok(sk) = base64::decode(&key) {
@@ -701,12 +705,17 @@ mod waiter_tests {
 
     #[async_trait]
     impl StreamTrait for TestStream {
+        /// Provides the test stream receive behavior.
         async fn recv(&mut self) -> Option<Result<BytesMut, Error>> { None }
+        /// Simulates a relay write for the test stream.
         async fn send_raw(&mut self, _: Bytes) -> ResultType<()> { Ok(()) }
+        /// Uses non-WebSocket framing for the test stream.
         fn is_ws(&self) -> bool { false }
+        /// Leaves the test stream unchanged when raw mode is requested.
         fn set_raw(&mut self) {}
     }
 
+    /// Checks that an old timeout cannot remove a replacement waiter.
     #[test]
     fn old_waiter_cannot_expire_a_reused_pair_id() {
         let old = Arc::new(());
