@@ -25,6 +25,7 @@ pub fn parse_bind_address(value: &str) -> Result<Option<IpAddr>> {
     }
 }
 
+/// Uses forwarding headers only for an explicitly trusted socket peer.
 pub(crate) fn websocket_peer_addr(
     addr: SocketAddr,
     headers: &tungstenite::http::HeaderMap,
@@ -36,6 +37,7 @@ pub(crate) fn websocket_peer_addr(
     forwarded_peer_addr(addr, headers, &TRUSTED_PROXIES)
 }
 
+/// Resolves trusted proxy headers while preserving the original socket port.
 fn forwarded_peer_addr(
     mut addr: SocketAddr,
     headers: &tungstenite::http::HeaderMap,
@@ -79,6 +81,7 @@ mod trusted_proxy_tests {
     use super::*;
     use tungstenite::http::{HeaderMap, HeaderValue};
 
+    /// Resolves test headers for a socket peer and an explicit trusted-proxy list.
     fn forwarded(peer: &str, trusted: &[&str], entries: &[(&str, &str)]) -> SocketAddr {
         let mut headers = HeaderMap::new();
         for (name, value) in entries {
@@ -95,6 +98,7 @@ mod trusted_proxy_tests {
         forwarded_peer_addr(peer.parse().unwrap(), &headers, &trusted)
     }
 
+    /// Checks that untrusted peers cannot replace their socket address.
     #[test]
     fn untrusted_peers_cannot_select_their_address() {
         for trusted in [vec![], vec!["192.0.2.1"], vec!["::1"]] {
@@ -118,6 +122,7 @@ mod trusted_proxy_tests {
         );
     }
 
+    /// Checks header precedence and preservation of each trusted connection port.
     #[test]
     fn trusted_peer_keeps_port_and_prefers_real_ip() {
         for port in [40000, 40001] {
@@ -136,6 +141,7 @@ mod trusted_proxy_tests {
         }
     }
 
+    /// Checks the first forwarded address and IPv6 client handling.
     #[test]
     fn trusted_forwarded_for_uses_first_address_and_supports_ipv6() {
         assert_eq!(
@@ -148,6 +154,7 @@ mod trusted_proxy_tests {
         );
     }
 
+    /// Checks that IPv4 and mapped IPv6 forms match the same trusted proxy.
     #[test]
     fn mapped_ipv4_proxy_addresses_match_the_same_host() {
         for (peer, proxy) in [
@@ -161,6 +168,7 @@ mod trusted_proxy_tests {
         }
     }
 
+    /// Checks that invalid or duplicate selected headers retain the socket address.
     #[test]
     fn malformed_or_ambiguous_headers_keep_the_socket_address() {
         let peer = "127.0.0.1:40000";

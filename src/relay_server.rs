@@ -417,6 +417,7 @@ async fn handle_connection(
     });
 }
 
+/// Prepares a TCP or WebSocket relay stream and begins pairing.
 async fn make_pair(
     stream: TcpStream,
     mut addr: SocketAddr,
