@@ -7,6 +7,7 @@ use hbbs::{common::*, *};
 
 const RMEM: usize = 0;
 
+/// Loads server settings and starts the rendezvous server.
 fn main() -> ResultType<()> {
     let _logger = Logger::try_with_env_or_str("info")?
         .log_to_stdout()

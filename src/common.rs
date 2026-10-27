@@ -425,6 +425,7 @@ pub async fn listen_signal() -> Result<()> {
 }
 
 
+/// Starts the update-check worker unless outbound checks are disabled.
 pub fn check_software_update() {
     if get_arg("DISABLE_UPDATE_CHECK").eq_ignore_ascii_case("Y") {
         return;
