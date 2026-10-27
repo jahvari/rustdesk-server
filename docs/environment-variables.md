@@ -249,6 +249,23 @@ ExecStart=/usr/bin/hbbs
 
 ---
 
+## WebSocket reverse proxies
+
+Both servers ignore `X-Real-IP` and `X-Forwarded-For` unless the actual socket
+peer is listed in `TRUSTED_PROXIES`. The default is empty (trust no proxies).
+Set it for each server using the inherited environment or `.env`, or an `hbbs`
+`--config` file, then restart. For example: `TRUSTED_PROXIES=127.0.0.1,::1`.
+Use only the exact IPv4/IPv6 addresses of your proxies as seen by the server;
+hostnames, CIDRs, wildcards and invalid entries are ignored. IPv4-mapped IPv6
+addresses match the corresponding IPv4 address. No proxy is trusted implicitly.
+
+A trusted proxy must remove or overwrite client-supplied forwarding headers.
+`X-Real-IP` takes precedence; otherwise the first comma-separated address in
+`X-Forwarded-For` is used. Invalid or repeated selected headers leave the socket
+address unchanged. Only the IP changes; each connection keeps its socket port.
+Existing reverse-proxy deployments must configure `TRUSTED_PROXIES` to retain
+forwarded client IPs. Keep backend WebSocket access limited to your proxies.
+
 ## Port reference
 
 | Port | Proto | Server | Purpose |

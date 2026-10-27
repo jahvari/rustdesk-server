@@ -25,6 +25,184 @@ pub fn parse_bind_address(value: &str) -> Result<Option<IpAddr>> {
     }
 }
 
+/// Uses forwarding headers only for an explicitly trusted socket peer.
+pub(crate) fn websocket_peer_addr(
+    addr: SocketAddr,
+    headers: &tungstenite::http::HeaderMap,
+) -> SocketAddr {
+    lazy_static::lazy_static! {
+        static ref TRUSTED_PROXIES: Vec<IpAddr> = get_arg("TRUSTED_PROXIES")
+            .split(',').filter_map(|value| value.trim().parse().ok()).collect();
+    }
+    forwarded_peer_addr(addr, headers, &TRUSTED_PROXIES)
+}
+
+/// Resolves trusted proxy headers while preserving the original socket port.
+fn forwarded_peer_addr(
+    mut addr: SocketAddr,
+    headers: &tungstenite::http::HeaderMap,
+    trusted_proxies: &[IpAddr],
+) -> SocketAddr {
+    let peer_ip = addr.ip().to_canonical();
+    if !trusted_proxies
+        .iter()
+        .any(|ip| ip.to_canonical() == peer_ip)
+    {
+        return addr;
+    }
+    let name = if headers.contains_key("X-Real-IP") {
+        "X-Real-IP"
+    } else {
+        "X-Forwarded-For"
+    };
+    let mut values = headers.get_all(name).iter();
+    let value = values.next();
+    if values.next().is_some() {
+        return addr;
+    }
+    let ip = value
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            let value = if name == "X-Forwarded-For" {
+                value.split(',').next()?
+            } else {
+                value
+            };
+            value.trim().parse().ok()
+        });
+    if let Some(ip) = ip {
+        addr.set_ip(ip);
+    }
+    addr
+}
+
+#[cfg(test)]
+mod trusted_proxy_tests {
+    use super::*;
+    use tungstenite::http::{HeaderMap, HeaderValue};
+
+    /// Resolves test headers for a socket peer and an explicit trusted-proxy list.
+    fn forwarded(peer: &str, trusted: &[&str], entries: &[(&str, &str)]) -> SocketAddr {
+        let mut headers = HeaderMap::new();
+        for (name, value) in entries {
+            headers.append(
+                name.parse::<tungstenite::http::header::HeaderName>()
+                    .unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        let trusted = trusted
+            .iter()
+            .map(|ip| ip.parse().unwrap())
+            .collect::<Vec<_>>();
+        forwarded_peer_addr(peer.parse().unwrap(), &headers, &trusted)
+    }
+
+    /// Checks that untrusted peers cannot replace their socket address.
+    #[test]
+    fn untrusted_peers_cannot_select_their_address() {
+        for trusted in [vec![], vec!["192.0.2.1"], vec!["::1"]] {
+            let peer = "127.0.0.1:40000";
+            assert_eq!(
+                forwarded(
+                    peer,
+                    &trusted,
+                    &[("X-Real-IP", "192.0.2.10"), ("X-Forwarded-For", "::1")]
+                ),
+                peer.parse().unwrap()
+            );
+        }
+        assert_eq!(
+            forwarded(
+                "[::127.0.0.1]:40000",
+                &["127.0.0.1"],
+                &[("X-Real-IP", "192.0.2.10")]
+            ),
+            "[::127.0.0.1]:40000".parse().unwrap()
+        );
+    }
+
+    /// Checks header precedence and preservation of each trusted connection port.
+    #[test]
+    fn trusted_peer_keeps_port_and_prefers_real_ip() {
+        for port in [40000, 40001] {
+            let peer = format!("127.0.0.1:{port}");
+            assert_eq!(
+                forwarded(
+                    &peer,
+                    &["127.0.0.1"],
+                    &[
+                        ("x-real-ip", "192.0.2.10"),
+                        ("X-Forwarded-For", "192.0.2.20")
+                    ]
+                ),
+                format!("192.0.2.10:{port}").parse().unwrap()
+            );
+        }
+    }
+
+    /// Checks the first forwarded address and IPv6 client handling.
+    #[test]
+    fn trusted_forwarded_for_uses_first_address_and_supports_ipv6() {
+        assert_eq!(
+            forwarded(
+                "[::1]:40000",
+                &["::1"],
+                &[("X-Forwarded-For", " 2001:db8::10 , 192.0.2.20")]
+            ),
+            "[2001:db8::10]:40000".parse().unwrap()
+        );
+    }
+
+    /// Checks that IPv4 and mapped IPv6 forms match the same trusted proxy.
+    #[test]
+    fn mapped_ipv4_proxy_addresses_match_the_same_host() {
+        for (peer, proxy) in [
+            ("[::ffff:127.0.0.1]:40000", "127.0.0.1"),
+            ("127.0.0.1:40000", "::ffff:127.0.0.1"),
+        ] {
+            assert_eq!(
+                forwarded(peer, &[proxy], &[("X-Real-IP", "192.0.2.10")]),
+                "192.0.2.10:40000".parse().unwrap()
+            );
+        }
+    }
+
+    /// Checks that invalid or duplicate selected headers retain the socket address.
+    #[test]
+    fn malformed_or_ambiguous_headers_keep_the_socket_address() {
+        let peer = "127.0.0.1:40000";
+        for entries in [
+            vec![],
+            vec![("X-Real-IP", "bad"), ("X-Forwarded-For", "192.0.2.10")],
+            vec![("X-Real-IP", "192.0.2.10, 192.0.2.20")],
+            vec![("X-Forwarded-For", ",192.0.2.10")],
+            vec![("X-Forwarded-For", "bad,192.0.2.10")],
+            vec![("X-Real-IP", "192.0.2.10:1234")],
+            vec![("X-Real-IP", "192.0.2.10"), ("X-Real-IP", "192.0.2.20")],
+            vec![
+                ("X-Forwarded-For", "192.0.2.10"),
+                ("X-Forwarded-For", "192.0.2.20"),
+            ],
+        ] {
+            assert_eq!(
+                forwarded(peer, &["127.0.0.1"], &entries),
+                peer.parse().unwrap()
+            );
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Real-IP", HeaderValue::from_bytes(b"\xff").unwrap());
+        assert_eq!(
+            forwarded_peer_addr(
+                peer.parse().unwrap(),
+                &headers,
+                &["127.0.0.1".parse().unwrap()]
+            ),
+            peer.parse().unwrap()
+        );
+    }
+}
+
 fn resource_limit(name: &str, default: usize, maximum: usize) -> usize {
     get_arg(name).parse::<usize>().ok()
         .filter(|n| *n > 0 && *n <= maximum).unwrap_or(default)
