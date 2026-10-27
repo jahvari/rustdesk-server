@@ -24,6 +24,7 @@ mod cache_tests {
     use super::*;
     use hbb_common::{futures_util::poll, tokio};
 
+    /// Checks that simultaneous database misses retain one cached peer identity.
     #[tokio::test]
     async fn concurrent_database_loads_keep_the_same_cached_peer() {
         let directory = tempfile::tempdir().unwrap();
@@ -162,6 +163,7 @@ impl PeerMap {
         register_pk_response::Result::OK
     }
 
+    /// Returns a cached peer or reads its durable record without replacing an existing identity.
     #[inline]
     pub(crate) async fn get(&self, id: &str) -> Option<LockPeer> {
         let p = self.map.read().await.get(id).cloned();
