@@ -21,10 +21,12 @@ lazy_static::lazy_static! {
     pub(crate) static ref MAX_IP_CACHE_ENTRIES: usize = cache_limit("MAX_IP_CACHE_ENTRIES", 10_000);
 }
 
+/// Reads a valid positive cache limit or returns the configured default.
 fn cache_limit(name: &str, default: usize) -> usize {
     get_arg(name).parse::<usize>().ok().filter(|n| *n > 0 && *n <= 1_000_000).unwrap_or(default)
 }
 
+/// Returns the existing peer or inserts a new one only while capacity remains.
 fn cache_peer(map: &mut HashMap<String, LockPeer>, id: &str, peer: LockPeer, limit: usize) -> Option<LockPeer> {
     if let Some(existing) = map.get(id) { return Some(existing.clone()); }
     if map.len() >= limit { return None; }
@@ -32,6 +34,7 @@ fn cache_peer(map: &mut HashMap<String, LockPeer>, id: &str, peer: LockPeer, lim
     Some(peer)
 }
 
+/// Removes expired peers while retaining active or externally held entries.
 fn prune_peers(map: &mut HashMap<String, LockPeer>) {
     map.retain(|_, peer| Arc::strong_count(peer) > 1 || peer.try_read().map(|peer| {
         peer.last_reg_time.elapsed().as_secs() < 600 || peer.reg_pk.1.elapsed().as_secs() < 600
@@ -43,6 +46,7 @@ mod cache_tests {
     use super::*;
     use hbb_common::{futures_util::poll, tokio};
 
+    /// Checks that simultaneous database misses retain one cached peer identity.
     #[tokio::test]
     async fn concurrent_database_loads_keep_the_same_cached_peer() {
         let directory = tempfile::tempdir().unwrap();
@@ -182,11 +186,13 @@ impl PeerMap {
         register_pk_response::Result::OK
     }
 
+    /// Returns a cached peer or reads its durable record without replacing an existing identity.
     #[inline]
     pub(crate) async fn get(&self, id: &str) -> Option<LockPeer> {
         self.get_with_limit(id, *MAX_PEER_CACHE_ENTRIES).await
     }
 
+    /// Loads a durable peer even when the selected cache limit prevents insertion.
     async fn get_with_limit(&self, id: &str, limit: usize) -> Option<LockPeer> {
         let p = self.map.read().await.get(id).cloned();
         if p.is_some() {
@@ -209,6 +215,7 @@ impl PeerMap {
         None
     }
 
+    /// Returns or admits a peer only when it can be kept in the bounded cache.
     #[inline]
     pub(crate) async fn get_or(&self, id: &str) -> Option<LockPeer> {
         if let Some(p) = self.get(id).await {
@@ -218,6 +225,7 @@ impl PeerMap {
         cache_peer(&mut w, id, LockPeer::default(), *MAX_PEER_CACHE_ENTRIES)
     }
 
+    /// Expires inactive peers and outdated IP bookkeeping without deleting durable records.
     pub(crate) async fn prune(&self) {
         prune_peers(&mut *self.map.write().await);
         IP_BLOCKER.lock().await.retain(|_, (a, b)| {
@@ -226,6 +234,7 @@ impl PeerMap {
         IP_CHANGES.lock().await.retain(|_, (time, _)| time.elapsed().as_secs() < IP_CHANGE_DUR_X2);
     }
 
+    /// Returns a peer only when it is present in the in-memory cache.
     #[inline]
     pub(crate) async fn get_in_memory(&self, id: &str) -> Option<LockPeer> {
         self.map.read().await.get(id).cloned()
@@ -282,6 +291,7 @@ mod bookkeeping_tests {
     use super::*;
     use hbb_common::tokio;
 
+    /// Checks that a full cache does not hide a durable peer record.
     #[tokio::test]
     async fn durable_lookup_remains_readable_when_the_cache_is_full() {
         let directory = tempfile::tempdir().unwrap();
@@ -301,6 +311,7 @@ mod bookkeeping_tests {
         assert_eq!(map.len(), 1);
     }
 
+    /// Checks the capacity limit without replacing an existing cached identity.
     #[test]
     fn capacity_rejects_new_peers_but_preserves_existing_identity() {
         let mut map = HashMap::new();
@@ -311,6 +322,7 @@ mod bookkeeping_tests {
         assert_eq!(map.len(), 1);
     }
 
+    /// Checks that cleanup preserves active peers, in-use peers, and database records.
     #[tokio::test]
     async fn cleanup_preserves_online_and_in_use_peers_and_durable_records() {
         let directory = tempfile::tempdir().unwrap();
