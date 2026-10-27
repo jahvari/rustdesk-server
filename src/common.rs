@@ -203,6 +203,7 @@ mod trusted_proxy_tests {
     }
 }
 
+/// Reads a positive bounded resource limit or returns its default.
 fn resource_limit(name: &str, default: usize, maximum: usize) -> usize {
     get_arg(name).parse::<usize>().ok()
         .filter(|n| *n > 0 && *n <= maximum).unwrap_or(default)
@@ -217,6 +218,7 @@ lazy_static::lazy_static! {
 }
 static LAST_ADMISSION_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
 
+/// Attempts to admit a socket and rate-limits warnings when the limit is reached.
 pub(crate) fn connection_permit(addr: SocketAddr) -> Option<tokio::sync::OwnedSemaphorePermit> {
     let permit = CONNECTIONS.clone().try_acquire_owned().ok();
     if permit.is_none() {
@@ -228,12 +230,14 @@ pub(crate) fn connection_permit(addr: SocketAddr) -> Option<tokio::sync::OwnedSe
     permit
 }
 
+/// Creates a framed codec with the configured control-message limit.
 pub(crate) fn control_codec() -> hbb_common::bytes_codec::BytesCodec {
     let mut codec = hbb_common::bytes_codec::BytesCodec::new();
     codec.set_max_packet_length(*CONTROL_MESSAGE_LIMIT);
     codec
 }
 
+/// Sets WebSocket frame and message limits for signaling or relay traffic.
 pub(crate) fn websocket_config(relay: bool) -> tungstenite::protocol::WebSocketConfig {
     let mut config = tungstenite::protocol::WebSocketConfig::default();
     let limit = if relay {
@@ -249,6 +253,7 @@ mod resource_limit_tests {
     use super::*;
     use hbb_common::{bytes::BytesMut, tokio_util::codec::Decoder};
 
+    /// Checks that oversized control frames are rejected before payload allocation.
     #[test]
     fn oversized_control_header_is_rejected_before_payload_reservation() {
         let mut codec = control_codec();
@@ -258,6 +263,7 @@ mod resource_limit_tests {
         assert!(bytes.capacity() <= header.len());
     }
 
+    /// Checks that raw relay traffic can exceed the control-packet limit.
     #[test]
     fn raw_relay_data_is_not_subject_to_control_packet_limit() {
         let mut codec = control_codec();
@@ -266,6 +272,7 @@ mod resource_limit_tests {
         assert_eq!(codec.decode(&mut bytes).unwrap().unwrap().len(), *CONTROL_MESSAGE_LIMIT + 1);
     }
 
+    /// Checks that a typical large online query fits the default control limit.
     #[test]
     fn batched_online_queries_fit_the_default_control_limit() {
         use hbb_common::{protobuf::Message, rendezvous_proto::*, tokio_util::codec::Encoder};
@@ -283,6 +290,7 @@ mod resource_limit_tests {
         assert_eq!(&codec.decode(&mut bytes).unwrap().unwrap()[..], &payload);
     }
 
+    /// Checks that dropping a connection permit restores admission capacity.
     #[test]
     fn connection_limit_releases_capacity_on_drop() {
         let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
@@ -733,6 +741,7 @@ mod http_client_tests {
     }
 }
 
+/// Starts the update-check worker unless outbound checks are disabled.
 pub fn check_software_update() {
     if get_arg("DISABLE_UPDATE_CHECK").eq_ignore_ascii_case("Y") {
         return;

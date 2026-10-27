@@ -266,6 +266,7 @@ impl RendezvousServer {
         )
     }
 
+    /// Serves rendezvous listeners and scheduled maintenance until a listener fails.
     async fn io_loop(
         &mut self,
         rx: &mut Receiver,
@@ -366,6 +367,7 @@ impl RendezvousServer {
         }
     }
 
+    /// Processes a UDP rendezvous request and sends any applicable response.
     #[inline]
     async fn handle_udp(
         &mut self,
@@ -871,6 +873,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Serializes and sends a rendezvous message through an available connection sink.
     #[inline]
     async fn send_to_sink(sink: &mut Option<Sink>, msg: RendezvousMessage) {
         if let Some(sink) = sink.as_mut() {
@@ -933,6 +936,7 @@ impl RendezvousServer {
         Ok(())
     }
 
+    /// Applies the per-IP registration rate and distinct-device limits.
     async fn check_ip_blocker(&self, ip: &str, id: &str) -> bool {
         let mut lock = IP_BLOCKER.lock().await;
         let now = Instant::now();
@@ -1144,6 +1148,7 @@ impl RendezvousServer {
         res
     }
 
+    /// Handles loopback console requests and external NAT or online-status queries.
     async fn handle_listener2(&self, stream: TcpStream, addr: SocketAddr) {
         let mut rs = self.clone();
         let ip = try_into_v4(addr).ip();
@@ -1187,6 +1192,7 @@ impl RendezvousServer {
         });
     }
 
+    /// Admits an accepted rendezvous connection and starts its handler.
     async fn handle_listener(&self, stream: TcpStream, addr: SocketAddr, key: &str, ws: bool) {
         let permit = match connection_permit(addr) { Some(permit) => Arc::new(permit), None => return };
         log::debug!("Tcp connection from {:?}, ws: {}", addr, ws);
@@ -1422,6 +1428,7 @@ async fn create_tcp_listener(bind_addr: Option<IpAddr>, port: i32) -> ResultType
 mod tests {
     use super::*;
 
+    /// Checks that an active signaling writer retains its admission permit.
     #[tokio::test]
     async fn signaling_writer_retains_capacity_after_reader_finishes() {
         let slots = Arc::new(tokio::sync::Semaphore::new(1));

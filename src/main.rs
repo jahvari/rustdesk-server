@@ -7,6 +7,7 @@ use hbbs::{common::*, *};
 
 const RMEM: usize = 0;
 
+/// Loads server settings and starts the rendezvous server.
 fn main() -> ResultType<()> {
     #[cfg(windows)]
     if hbbs::windows_service::dispatch("hbbs", run)? {
