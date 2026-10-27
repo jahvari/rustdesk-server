@@ -655,7 +655,7 @@ mod tests {
     }
 }
 
-/// Resolves the configured relay key to its public-key value when available.
+/// Returns the configured relay key or resolves a signing key to its public value.
 fn get_server_sk(key: &str) -> ResultType<String> {
     let mut key = key.to_owned();
     if let Ok(sk) = base64::decode(&key) {
