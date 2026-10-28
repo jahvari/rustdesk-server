@@ -268,7 +268,9 @@ not pass a client-supplied chain through unchanged. For NGINX, configure
 mode also appends the connecting peer. If another proxy sits in front, include
 its exact address only when it is under your control and follows the same rule.
 `X-Real-IP` is ignored because it can be forwarded unchanged by a proxy.
-Invalid or repeated headers leave the socket address unchanged. Client IPs are
+Malformed hops examined during the right-to-left scan leave the socket address
+unchanged; repeated header fields are rejected during the WebSocket handshake.
+Client IPs are
 canonicalized, and each connection keeps its proxy-to-server socket port; this
 port does not represent the original client's port. Exact-IP configuration is
 not suitable for dynamically changing load-balancer addresses without a managed
