@@ -259,12 +259,22 @@ Use only the exact IPv4/IPv6 addresses of your proxies as seen by the server;
 hostnames, CIDRs, wildcards and invalid entries are ignored. IPv4-mapped IPv6
 addresses match the corresponding IPv4 address. No proxy is trusted implicitly.
 
-A trusted proxy must remove or overwrite client-supplied forwarding headers.
-`X-Real-IP` takes precedence; otherwise the first comma-separated address in
-`X-Forwarded-For` is used. Invalid or repeated selected headers leave the socket
-address unchanged. Only the IP changes; each connection keeps its socket port.
-Existing reverse-proxy deployments must configure `TRUSTED_PROXIES` to retain
-forwarded client IPs. Keep backend WebSocket access limited to your proxies.
+`X-Forwarded-For` is read from right to left, skipping explicitly trusted proxy
+addresses and using the first untrusted address. Configure every proxy hop that
+appends to this chain, including the proxy connected to the server. A trusted
+proxy must append the actual connecting peer or overwrite the header; it must
+not pass a client-supplied chain through unchanged. For NGINX, configure
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`; AWS ALB append
+mode also appends the connecting peer. If another proxy sits in front, include
+its exact address only when it is under your control and follows the same rule.
+`X-Real-IP` is ignored because it can be forwarded unchanged by a proxy.
+Invalid or repeated headers leave the socket address unchanged. Client IPs are
+canonicalized, and each connection keeps its proxy-to-server socket port; this
+port does not represent the original client's port. Exact-IP configuration is
+not suitable for dynamically changing load-balancer addresses without a managed
+allowlist or a stable, controlled reverse proxy. Existing deployments must set
+`TRUSTED_PROXIES` and forward `X-Forwarded-For` to retain client IPs. Keep
+backend WebSocket access limited to your proxies.
 
 ## Port reference
 
