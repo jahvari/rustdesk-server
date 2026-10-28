@@ -269,6 +269,11 @@ its exact address only when it is under your control and follows the same rule.
 `X-Real-IP` is ignored because it can be forwarded unchanged by a proxy.
 Malformed hops examined during the right-to-left scan leave the socket address
 unchanged; repeated header fields are rejected during the WebSocket handshake.
+For HAProxy directly facing clients, disable `option forwardfor` and use
+`http-request set-header X-Forwarded-For %[src]` to send a single overwritten
+field. If HAProxy is behind another proxy, this simple configuration identifies
+that upstream proxy rather than the original client; use a tested single-field
+chain configuration instead. Never trust client-provided headers as a shortcut.
 Client IPs are
 canonicalized, and each connection keeps its proxy-to-server socket port; this
 port does not represent the original client's port. Exact-IP configuration is
