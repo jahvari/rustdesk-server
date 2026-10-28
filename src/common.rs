@@ -50,28 +50,22 @@ fn forwarded_peer_addr(
     {
         return addr;
     }
-    let name = if headers.contains_key("X-Real-IP") {
-        "X-Real-IP"
-    } else {
-        "X-Forwarded-For"
-    };
-    let mut values = headers.get_all(name).iter();
+    // X-Real-IP may be forwarded unchanged by a proxy; only the appended
+    // X-Forwarded-For chain establishes which hop supplied an address.
+    let mut values = headers.get_all("X-Forwarded-For").iter();
     let value = values.next();
     if values.next().is_some() {
         return addr;
     }
-    let ip = value
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            let value = if name == "X-Forwarded-For" {
-                value.split(',').next()?
-            } else {
-                value
-            };
-            value.trim().parse().ok()
-        });
-    if let Some(ip) = ip {
-        addr.set_ip(ip);
+    if let Some(Ok(value)) = value.map(|value| value.to_str()) {
+        for hop in value.rsplit(',') {
+            let Ok(ip) = hop.trim().parse::<IpAddr>() else { return addr; };
+            let ip = ip.to_canonical();
+            if !trusted_proxies.iter().any(|trusted| trusted.to_canonical() == ip) {
+                addr.set_ip(ip);
+                return addr;
+            }
+        }
     }
     addr
 }
@@ -122,85 +116,44 @@ mod trusted_proxy_tests {
         );
     }
 
-    /// Checks header precedence and preservation of each trusted connection port.
+    /// Rejects spoofed prefixes and conflicting X-Real-IP headers.
     #[test]
-    fn trusted_peer_keeps_port_and_prefers_real_ip() {
+    fn forwarded_chain_selects_nearest_untrusted_hop() {
         for port in [40000, 40001] {
             let peer = format!("127.0.0.1:{port}");
-            assert_eq!(
-                forwarded(
-                    &peer,
-                    &["127.0.0.1"],
-                    &[
-                        ("x-real-ip", "192.0.2.10"),
-                        ("X-Forwarded-For", "192.0.2.20")
-                    ]
-                ),
-                format!("192.0.2.10:{port}").parse().unwrap()
-            );
+            assert_eq!(forwarded(&peer, &["127.0.0.1", "192.0.2.2"], &[
+                ("X-Real-IP", "203.0.113.99"),
+                ("X-Forwarded-For", "203.0.113.99, 192.0.2.10, 192.0.2.2"),
+            ]), format!("192.0.2.10:{port}").parse().unwrap());
         }
+        assert_eq!(forwarded("[::1]:40000", &["::1"], &[("X-Forwarded-For", "::ffff:192.0.2.10")]),
+            "192.0.2.10:40000".parse().unwrap());
     }
 
-    /// Checks the first forwarded address and IPv6 client handling.
-    #[test]
-    fn trusted_forwarded_for_uses_first_address_and_supports_ipv6() {
-        assert_eq!(
-            forwarded(
-                "[::1]:40000",
-                &["::1"],
-                &[("X-Forwarded-For", " 2001:db8::10 , 192.0.2.20")]
-            ),
-            "[2001:db8::10]:40000".parse().unwrap()
-        );
-    }
-
-    /// Checks that IPv4 and mapped IPv6 forms match the same trusted proxy.
-    #[test]
-    fn mapped_ipv4_proxy_addresses_match_the_same_host() {
-        for (peer, proxy) in [
-            ("[::ffff:127.0.0.1]:40000", "127.0.0.1"),
-            ("127.0.0.1:40000", "::ffff:127.0.0.1"),
-        ] {
-            assert_eq!(
-                forwarded(peer, &[proxy], &[("X-Real-IP", "192.0.2.10")]),
-                "192.0.2.10:40000".parse().unwrap()
-            );
-        }
-    }
-
-    /// Checks that invalid or duplicate selected headers retain the socket address.
+    /// Rejects malformed or ambiguous chains and ignores X-Real-IP alone.
     #[test]
     fn malformed_or_ambiguous_headers_keep_the_socket_address() {
         let peer = "127.0.0.1:40000";
-        for entries in [
-            vec![],
-            vec![("X-Real-IP", "bad"), ("X-Forwarded-For", "192.0.2.10")],
-            vec![("X-Real-IP", "192.0.2.10, 192.0.2.20")],
-            vec![("X-Forwarded-For", ",192.0.2.10")],
-            vec![("X-Forwarded-For", "bad,192.0.2.10")],
-            vec![("X-Real-IP", "192.0.2.10:1234")],
-            vec![("X-Real-IP", "192.0.2.10"), ("X-Real-IP", "192.0.2.20")],
-            vec![
-                ("X-Forwarded-For", "192.0.2.10"),
-                ("X-Forwarded-For", "192.0.2.20"),
-            ],
-        ] {
-            assert_eq!(
-                forwarded(peer, &["127.0.0.1"], &entries),
-                peer.parse().unwrap()
-            );
+        for entries in [vec![], vec![("X-Real-IP", "192.0.2.10")],
+            vec![("X-Forwarded-For", "192.0.2.10, bad")],
+            vec![("X-Forwarded-For", "192.0.2.10,")],
+            vec![("X-Forwarded-For", "127.0.0.1")],
+            vec![("X-Forwarded-For", "192.0.2.10"), ("X-Forwarded-For", "192.0.2.20")]] {
+            assert_eq!(forwarded(peer, &["127.0.0.1"], &entries), peer.parse().unwrap());
         }
         let mut headers = HeaderMap::new();
-        headers.insert("X-Real-IP", HeaderValue::from_bytes(b"\xff").unwrap());
-        assert_eq!(
-            forwarded_peer_addr(
-                peer.parse().unwrap(),
-                &headers,
-                &["127.0.0.1".parse().unwrap()]
-            ),
-            peer.parse().unwrap()
-        );
+        headers.insert("X-Forwarded-For", HeaderValue::from_bytes(b"\xff").unwrap());
+        assert_eq!(forwarded_peer_addr(peer.parse().unwrap(), &headers, &["127.0.0.1".parse().unwrap()]), peer.parse().unwrap());
     }
+
+    /// Checks IPv4 and mapped IPv6 trusted proxy addresses match.
+    #[test]
+    fn mapped_ipv4_proxy_addresses_match_the_same_host() {
+        for (peer, proxy) in [("[::ffff:127.0.0.1]:40000", "127.0.0.1"), ("127.0.0.1:40000", "::ffff:127.0.0.1")] {
+            assert_eq!(forwarded(peer, &[proxy], &[("X-Forwarded-For", "192.0.2.10")]), "192.0.2.10:40000".parse().unwrap());
+        }
+    }
+
 }
 
 pub async fn listen_tcp(

@@ -432,6 +432,11 @@ async fn make_pair(
             Ok(response)
         };
         let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;
+        let ip = addr.ip().to_canonical().to_string();
+        if BLOCKLIST.read().await.contains(&ip) {
+            log::info!("{} blocked", ip);
+            return Ok(());
+        }
         make_pair_(ws_stream, addr, key, limiter).await;
     } else {
         make_pair_(FramedStream::from(stream, addr), addr, key, limiter).await;
