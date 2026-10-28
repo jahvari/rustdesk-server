@@ -442,6 +442,11 @@ async fn make_pair(
             Ok(response)
         };
         let ws_stream = timeout(30_000, tokio_tungstenite::accept_hdr_async_with_config(stream, callback, Some(crate::common::websocket_config(true)))).await??;
+        let ip = addr.ip().to_canonical().to_string();
+        if BLOCKLIST.read().await.contains(&ip) {
+            log::info!("{} blocked", ip);
+            return Ok(());
+        }
         make_pair_(LimitedStream { inner: ws_stream, _permit: permit }, addr, key, limiter).await;
     } else {
         let mut stream = FramedStream::from(stream, addr);
