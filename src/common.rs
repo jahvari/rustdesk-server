@@ -25,6 +25,20 @@ pub fn parse_bind_address(value: &str) -> Result<Option<IpAddr>> {
     }
 }
 
+/// Rejects ambiguous forwarding chains before a WebSocket connection is accepted.
+pub(crate) fn validate_forwarding_headers(
+    headers: &tungstenite::http::HeaderMap,
+) -> Result<(), tungstenite::handshake::server::ErrorResponse> {
+    if headers.get_all("X-Forwarded-For").iter().nth(1).is_some() {
+        let mut response = tungstenite::handshake::server::ErrorResponse::new(
+            Some("Repeated X-Forwarded-For headers".to_owned()),
+        );
+        *response.status_mut() = tungstenite::http::StatusCode::BAD_REQUEST;
+        return Err(response);
+    }
+    Ok(())
+}
+
 /// Uses forwarding headers only for an explicitly trusted socket peer.
 pub(crate) fn websocket_peer_addr(
     addr: SocketAddr,
@@ -128,6 +142,17 @@ mod trusted_proxy_tests {
         }
         assert_eq!(forwarded("[::1]:40000", &["::1"], &[("X-Forwarded-For", "::ffff:192.0.2.10")]),
             "192.0.2.10:40000".parse().unwrap());
+    }
+
+    /// Rejects duplicate fields and ignores unexamined client-supplied prefixes.
+    #[test]
+    fn rejects_duplicate_fields_before_handshake() {
+        let mut headers = HeaderMap::new();
+        headers.append("X-Forwarded-For", HeaderValue::from_static("192.0.2.10"));
+        assert!(validate_forwarding_headers(&headers).is_ok());
+        headers.append("X-Forwarded-For", HeaderValue::from_static("192.0.2.20"));
+        assert_eq!(validate_forwarding_headers(&headers).unwrap_err().status(), 400);
+        assert_eq!(forwarded("127.0.0.1:40000", &["127.0.0.1"], &[("X-Forwarded-For", "bad, 192.0.2.10")]), "192.0.2.10:40000".parse().unwrap());
     }
 
     /// Rejects malformed or ambiguous chains and ignores X-Real-IP alone.

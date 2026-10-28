@@ -1193,6 +1193,7 @@ impl RendezvousServer {
         if ws {
             use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
             let callback = |req: &Request, response: Response| {
+                crate::common::validate_forwarding_headers(req.headers())?;
                 addr = websocket_peer_addr(addr, req.headers());
                 Ok(response)
             };
